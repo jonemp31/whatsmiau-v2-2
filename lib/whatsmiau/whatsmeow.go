@@ -52,6 +52,7 @@ func Get() *Whatsmiau {
 func LoadMiau(ctx context.Context, container *sqlstore.Container, converterSvc *converter.ConverterService) {
 	mu.Lock()
 	defer mu.Unlock()
+
 	deviceStore, err := container.GetAllDevices(ctx)
 	if err != nil {
 		panic(err)
@@ -72,32 +73,27 @@ func LoadMiau(ctx context.Context, container *sqlstore.Container, converterSvc *
 		if len(inst.RemoteJID) <= 0 {
 			continue
 		}
-
 		instanceByRemoteJid[inst.RemoteJID] = inst
 	}
 
 	clients := xsync.NewMap[string, *whatsmeow.Client]()
-
 	clientLog := waLog.Stdout("Client", level, false)
-	for _, device := range deviceStore {
-		client := whatsmeow.NewClient(device, clientLog)
-		if err := client.Connect(); err != nil {
-			zap.L().Error("failed to connect connected device", zap.Error(err), zap.String("jid", client.Store.ID.String()))
-		}
 
-		if client.Store.ID == nil {
-			_ = client.Logout(context.Background())
-			client.Disconnect()
+	// Processar dispositivos existentes
+	for _, device := range deviceStore {
+		if device.ID == nil {
 			continue
 		}
 
-		instanceFound, ok := instanceByRemoteJid[client.Store.ID.String()]
-		if ok {
-			clients.Store(instanceFound.ID, client)
-		} else {
-			_ = client.Logout(context.Background())
-			client.Disconnect()
+		instanceFound, ok := instanceByRemoteJid[device.ID.String()]
+		if !ok {
+			zap.L().Warn("Orphaned device found in store, deleting.", zap.String("jid", device.ID.String()))
+			_ = container.DeleteDevice(ctx, device) // Clean up
+			continue
 		}
+
+		client := whatsmeow.NewClient(device, clientLog)
+		clients.Store(instanceFound.ID, client)
 	}
 
 	var storage interfaces.Storage
@@ -118,7 +114,7 @@ func LoadMiau(ctx context.Context, container *sqlstore.Container, converterSvc *
 		observerRunning: xsync.NewMap[string, bool](),
 		emitter:         make(chan emitter, env.Env.EmitterBufferSize),
 		httpClient: &http.Client{
-			Timeout: time.Second * 30, // TODO: load from env
+			Timeout: time.Second * 30,
 		},
 		fileStorage:      storage,
 		handlerSemaphore: make(chan struct{}, env.Env.HandlerSemaphoreSize),
@@ -128,50 +124,19 @@ func LoadMiau(ctx context.Context, container *sqlstore.Container, converterSvc *
 
 	go instance.startEmitter()
 
-	deviceStore, err = container.GetAllDevices(ctx)
-	if err != nil {
-		panic(err)
-	}
+	// Conectar dispositivos existentes e registrar event handlers
+	clients.Range(func(id string, client *whatsmeow.Client) bool {
+		// FIX: Anexar o manipulador ANTES de conectar para evitar perder eventos
+		client.AddEventHandler(instance.Handle(id))
 
-	instanceList, err = repo.List(ctx, "")
-	if err != nil {
-		zap.L().Fatal("Failed to list instances", zap.Error(err))
-	}
-	instanceByRemoteJid = make(map[string]models.Instance)
-	for _, inst := range instanceList {
-		if len(inst.RemoteJID) <= 0 {
-			continue
-		}
-		instanceByRemoteJid[inst.RemoteJID] = inst
-	}
-
-	for _, device := range deviceStore {
-		if device.ID == nil {
-			continue
-		}
-
-		instanceFound, ok := instanceByRemoteJid[device.ID.String()]
-		if !ok {
-			zap.L().Warn("Orphaned device found in store, deleting.", zap.String("jid", device.ID.String()))
-			_ = container.DeleteDevice(ctx, device) // Clean up
-			continue
-		}
-
-		client := whatsmeow.NewClient(device, instance.logger)
-
-		// FIX: Anexar o manipulador ANTES de conectar para evitar perder eventos.
-		client.AddEventHandler(instance.Handle(instanceFound.ID))
-		instance.clients.Store(instanceFound.ID, client)
-
-		// FIX: Emitir 'connecting' manualmente para notificar o início da tentativa de reconexão.
-		go instance.EmitConnectionEvent(instanceFound.ID, Connecting)
+		// FIX: Emitir 'connecting' manualmente para notificar o início da tentativa de reconexão
+		go instance.EmitConnectionEvent(id, Connecting)
 
 		if err := client.Connect(); err != nil {
-			zap.L().Error("failed to initiate connection for device", zap.Error(err), zap.String("jid", device.ID.String()))
-			// O evento de Desconexão será disparado pelo manipulador se a conexão falhar.
+			zap.L().Error("failed to connect device", zap.Error(err), zap.String("jid", client.Store.ID.String()))
 		}
-	}
-
+		return true
+	})
 }
 
 func (s *Whatsmiau) Connect(ctx context.Context, id string) (string, error) {
@@ -248,8 +213,11 @@ func (s *Whatsmiau) observeConnection(client *whatsmeow.Client, id string) {
 				} else {
 					client.RemoveEventHandlers()
 					client.AddEventHandler(s.Handle(id))
-					// FIX: Removida a lógica redundante de atualização do RemoteJID
-					// Agora centralizada no evento Connected para evitar inconsistências
+					if _, err := s.repo.Update(context.Background(), id, &models.Instance{
+						RemoteJID: client.Store.ID.String(),
+					}); err != nil {
+						zap.L().Error("failed to update instance after login", zap.Error(err))
+					}
 				}
 				return
 			}
