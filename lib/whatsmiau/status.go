@@ -3,6 +3,7 @@ package whatsmiau
 import (
 	"context"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -84,7 +85,7 @@ func (s *Whatsmiau) SendStatusImage(ctx context.Context, data *SendStatusImageRe
 	}
 
 	// Baixar e fazer upload da imagem
-	resMedia, err := s.getCtx(ctx, data.MediaURL)
+	resMedia, err := s.httpClient.Get(data.MediaURL)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +144,7 @@ func (s *Whatsmiau) SendStatusVideo(ctx context.Context, data *SendStatusVideoRe
 	}
 
 	// Baixar e fazer upload do vídeo
-	resMedia, err := s.getCtx(ctx, data.MediaURL)
+	resMedia, err := s.httpClient.Get(data.MediaURL)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +203,7 @@ func (s *Whatsmiau) SendStatusAudio(ctx context.Context, data *SendStatusAudioRe
 	}
 
 	// Baixar e fazer upload do áudio
-	resMedia, err := s.getCtx(ctx, data.MediaURL)
+	resMedia, err := s.httpClient.Get(data.MediaURL)
 	if err != nil {
 		return nil, err
 	}
@@ -212,11 +213,15 @@ func (s *Whatsmiau) SendStatusAudio(ctx context.Context, data *SendStatusAudioRe
 		return nil, err
 	}
 
-	// Processar áudio (converter para formato WhatsApp)
-	audioData, waveForm, secs, err := convertAudio(dataBytes, 64)
+	// Usar o converter service para processar áudio
+	audioData, err := s.converter.ProcessMedia(ctx, data.MediaURL, "audio")
 	if err != nil {
 		return nil, err
 	}
+	
+	// Para manter compatibilidade, usar valores padrão
+	waveForm := []byte{}
+	secs := 0.0
 
 	uploaded, err := client.Upload(ctx, audioData, whatsmeow.MediaAudio)
 	if err != nil {
