@@ -16,7 +16,7 @@ type WorkerPool struct {
 	workerWg     sync.WaitGroup
 	quit         chan struct{}
 	started      bool
-	mu           sync.RWMux
+	mu           sync.RWMutex
 }
 
 type contextTask struct {
