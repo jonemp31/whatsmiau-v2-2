@@ -3,7 +3,6 @@ package whatsmiau
 import (
 	"context"
 	"io"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -204,11 +203,6 @@ func (s *Whatsmiau) SendStatusAudio(ctx context.Context, data *SendStatusAudioRe
 
 	// Baixar e fazer upload do áudio
 	resMedia, err := s.httpClient.Get(data.MediaURL)
-	if err != nil {
-		return nil, err
-	}
-
-	dataBytes, err := io.ReadAll(resMedia.Body)
 	if err != nil {
 		return nil, err
 	}
