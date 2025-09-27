@@ -142,8 +142,10 @@ func LoadMiau(ctx context.Context, container *sqlstore.Container, converterSvc *
 func (s *Whatsmiau) Connect(ctx context.Context, id string) (string, error) {
 	client, ok := s.clients.Load(id)
 	if !ok {
+		// FIX: Criar novo cliente e registrar event handler ANTES de qualquer operação
 		device := s.container.NewDevice()
 		client = whatsmeow.NewClient(device, s.logger)
+		client.AddEventHandler(s.Handle(id))
 		s.clients.Store(id, client)
 	}
 
@@ -383,9 +385,10 @@ func (s *Whatsmiau) SendReadReceipt(instanceID string, chatJID types.JID, sender
 func (s *Whatsmiau) PairPhone(ctx context.Context, instanceID, phoneNumber string) (string, error) {
 	client, ok := s.clients.Load(instanceID)
 	if !ok {
-		// Se o cliente não existe, cria um novo para o processo de pareamento
+		// FIX: Criar novo cliente e registrar event handler ANTES de qualquer operação
 		device := s.container.NewDevice()
 		client = whatsmeow.NewClient(device, s.logger)
+		client.AddEventHandler(s.Handle(instanceID))
 		s.clients.Store(instanceID, client)
 	}
 
@@ -400,9 +403,6 @@ func (s *Whatsmiau) PairPhone(ctx context.Context, instanceID, phoneNumber strin
 			return "", fmt.Errorf("failed to connect client: %w", err)
 		}
 	}
-
-	// Adiciona o event handler ANTES de gerar o código
-	client.AddEventHandler(s.Handle(instanceID))
 
 	// Gera o código de pareamento
 	code, err := client.PairPhone(ctx, phoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Windows)")
