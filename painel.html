@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Testes - WhatsMiau API</title>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --primary-hover: #0056b3;
+            --danger-color: #dc3545;
+            --danger-hover: #c82333;
+            --success-color: #28a745;
+            --success-hover: #218838;
+            --warning-color: #ffc107;
+            --warning-hover: #e0a800;
+            --light-bg: #f8f9fa;
+            --dark-bg: #2d333b;
+            --dark-text: #adbac7;
+            --border-color: #dee2e6;
+        }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            margin: 0; 
+            background-color: #f4f7f9; 
+            color: #333; 
+        }
+        .container { 
+            max-width: 1400px; 
+            margin: 20px auto; 
+            padding: 20px; 
+            background-color: #fff; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1); 
+        }
+        h1, h2 { 
+            color: var(--primary-hover); 
+            border-bottom: 2px solid #eef; 
+            padding-bottom: 10px; 
+            margin-top: 0;
+        }
+        .endpoint-group { 
+            margin-bottom: 25px; 
+            padding: 20px; 
+            border: 1px solid var(--border-color); 
+            border-radius: 8px; 
+            background-color: #fff;
+        }
+        label { 
+            display: block; 
+            font-weight: 600; 
+            margin-top: 15px; 
+            margin-bottom: 5px; 
+        }
+        input[type="text"], input[type="number"], textarea, select { 
+            width: calc(100% - 24px); 
+            padding: 12px; 
+            border: 1px solid #ccc; 
+            border-radius: 6px; 
+            font-size: 14px; 
+            transition: border-color 0.2s;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: var(--primary-color);
+            outline: none;
+        }
+        button { 
+            background-color: var(--primary-color); 
+            color: white; 
+            padding: 12px 18px; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            margin-top: 15px; 
+            margin-right: 10px; 
+            transition: background-color 0.2s, transform 0.1s;
+            font-weight: 500;
+        }
+        button:hover { 
+            background-color: var(--primary-hover); 
+            transform: translateY(-1px);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        .btn-danger { background-color: var(--danger-color); }
+        .btn-danger:hover { background-color: var(--danger-hover); }
+        .btn-success { background-color: var(--success-color); }
+        .btn-success:hover { background-color: var(--success-hover); }
+        .btn-warning { background-color: var(--warning-color); color: #212529; }
+        .btn-warning:hover { background-color: var(--warning-hover); }
+
+        #response-area { 
+            grid-column: 1 / -1; 
+        }
+        #response { 
+            width: calc(100% - 22px); 
+            height: 500px; 
+            background-color: var(--dark-bg); 
+            color: var(--dark-text); 
+            border: 1px solid #444; 
+            border-radius: 6px; 
+            padding: 10px; 
+            font-family: "Courier New", Courier, monospace; 
+            white-space: pre-wrap; 
+            overflow-wrap: break-word; 
+        }
+        .common-fields { 
+            background-color: var(--light-bg); 
+            padding: 20px; 
+            border-radius: 8px; 
+            grid-column: 1 / -1;
+            border: 1px solid var(--border-color);
+        }
+        .note { font-size: 0.9em; color: #555; margin-top: 5px; }
+        .checkbox-group { display: flex; align-items: center; margin-top: 10px; }
+        .checkbox-group input[type="checkbox"] { width: auto; margin-right: 10px; }
+        .checkbox-group label { font-weight: normal; margin: 0; }
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        .status-section, .pairing-section, .settings-section, .chat-actions-section { 
+            background-color: var(--light-bg); 
+            padding: 15px; 
+            border-radius: 6px; 
+            border: 1px solid var(--border-color);
+        }
+         #pairing-code-display { 
+            font-size: 2em; 
+            font-weight: bold; 
+            color: var(--success-color); 
+            text-align: center; 
+            margin-top: 15px; 
+            letter-spacing: 5px;
+            background-color: #e8f5e8;
+            padding: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="common-fields">
+        <h1>Painel de Testes da API WhatsMiau</h1>
+        <p style="color: #666;">✨ Interface para testar todos os endpoints da API, incluindo as novas funcionalidades.</p>
+        <div class="grid-container">
+            <div>
+                <label for="apiUrl">URL Base da API:</label>
+                <input type="text" id="apiUrl" placeholder="https://sua-api.com" value="http://192.168.100.149:8080">
+                 <div class="note">Deixe em branco para usar o endereço atual.</div>
+            </div>
+            <div>
+                <label for="apiKey">API Key:</label>
+                <input type="text" id="apiKey" placeholder="Sua Chave de API Secreta" value="31121997">
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-container">
+        <div class="endpoint-group">
+            <h2>Gerenciamento de Instância</h2>
+            <label for="instanceName">Nome da Instância:</label>
+            <input type="text" id="instanceName" placeholder="ex: instancia01" value="instancia01">
+            <button onclick="createInstance()">1. Criar Instância</button>
+            <button onclick="getInstanceQR()">2. Conectar (QR Code)</button>
+            <button onclick="getInstanceStatus()">Ver Status</button>
+            <button onclick="listInstances()">Listar Todas</button>
+            <button onclick="disconnectInstance()" class="btn-warning">Desconectar</button>
+            <button onclick="deleteInstance()" class="btn-danger">Apagar Instância</button>
+        </div>
+
+        <div class="endpoint-group">
+            <h2>Conectar com Pairing Code</h2>
+             <div class="pairing-section">
+                <label for="phoneNumber">Número do Telefone (com DDI):</label>
+                <input type="text" id="phoneNumber" placeholder="Ex: 5511999998888">
+                <button onclick="getPairingCode()" class="btn-success">Obter Código de Pareamento</button>
+                <div id="pairing-code-display"></div>
+            </div>
+        </div>
+
+        <div class="endpoint-group">
+            <h2>Configurações da Instância</h2>
+            <div class="settings-section">
+                <h3>Confirmação de Leitura</h3>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="autoReadMessages" checked>
+                    <label for="autoReadMessages">Ativar leitura automática (ticks azuis)</label>
+                </div>
+                <label for="readDelay">Delay para Leitura (segundos):</label>
+                <input type="number" id="readDelay" value="8" min="0">
+                <button onclick="updateReadSettings()" class="btn-warning">Atualizar Config. de Leitura</button>
+            </div>
+             <div class="settings-section" style="margin-top: 15px;">
+                <h3>Webhook</h3>
+                <label for="webhookUrl">URL do Webhook:</label>
+                <input type="text" id="webhookUrl" placeholder="https://seusite.com/webhook">
+                <label>Eventos:</label>
+                <div class="checkbox-group"><input type="checkbox" name="webhook_events" value="CONNECTION_UPDATE" checked><label>connection.update</label></div>
+                <div class="checkbox-group"><input type="checkbox" name="webhook_events" value="MESSAGES_UPSERT" checked><label>messages.upsert</label></div>
+                <div class="checkbox-group"><input type="checkbox" name="webhook_events" value="MESSAGES_UPDATE" checked><label>messages.update</label></div>
+                <div class="checkbox-group"><input type="checkbox" name="webhook_events" value="CONTACTS_UPSERT" checked><label>contacts.upsert</label></div>
+                <button onclick="updateWebhook()" class="btn-warning">Atualizar Webhook</button>
+            </div>
+        </div>
+        
+        <div class="endpoint-group">
+            <h2>Ações de Chat</h2>
+            <div class="chat-actions-section">
+                 <label for="chatNumber">Número do Chat (para presença/leitura):</label>
+                <input type="text" id="chatNumber" placeholder="Ex: 5511999998888">
+                <button onclick="sendPresence('composing')">Enviar "Digitando"</button>
+                <button onclick="sendPresence('recording')">Enviar "Gravando Áudio"</button>
+            </div>
+             <div class="chat-actions-section" style="margin-top: 15px;">
+                <label for="messageId">ID da Mensagem para Marcar como Lida:</label>
+                <input type="text" id="messageId" placeholder="ID recebido no webhook">
+                <div class="note">O `remoteJid` será o número do chat acima.</div>
+                <button onclick="markAsRead()">Marcar como Lida</button>
+            </div>
+        </div>
+
+        <div class="endpoint-group" style="grid-column: 1 / -1;">
+            <h2>Envio de Mensagens</h2>
+            <label for="recipientNumber">Número do Destinatário (com DDI):</label>
+            <input type="text" id="recipientNumber" placeholder="Ex: 5511999998888">
+
+            <hr style="margin-top:20px; border: 1px solid #eee;">
+            <label for="textMessage">Mensagem de Texto:</label>
+            <textarea id="textMessage" rows="2">Olá, esta é uma mensagem de teste da API WhatsMiau! 🚀</textarea>
+            <button onclick="sendTextMessage()">Enviar Texto</button>
+
+            <hr style="margin-top:20px; border: 1px solid #eee;">
+            <label for="mediaUrl">URL da Mídia (Imagem, Áudio, Vídeo, Documento):</label>
+            <input type="text" id="mediaUrl" placeholder="https://.../arquivo.jpg">
+            <label for="mediaCaption">Legenda da Mídia:</label>
+            <input type="text" id="mediaCaption" placeholder="Legenda (opcional)">
+            
+            <div class="checkbox-group">
+                <input type="checkbox" id="viewOnce">
+                <label for="viewOnce">Enviar como visualização única (View Once)</label>
+            </div>
+
+            <button onclick="sendMedia('image')">Enviar Imagem</button>
+            <button onclick="sendMedia('audio')">Enviar Áudio</button>
+            <button onclick="sendMedia('video')">Enviar Vídeo</button>
+            <button onclick="sendMedia('document')">Enviar Documento</button>
+        </div>
+        
+        <div class="endpoint-group" style="grid-column: 1 / -1;">
+            <h2>Publicar Status no WhatsApp</h2>
+             <div class="status-section grid-container">
+                <div>
+                    <label for="statusText">Texto do Status:</label>
+                    <textarea id="statusText" rows="3">Status de teste! ✨</textarea>
+                    <label for="statusBackground">Cor de Fundo (hex):</label>
+                    <input type="text" id="statusBackground" placeholder="#FF0000" value="#007bff">
+                    <button onclick="sendStatusText()" class="btn-success">Enviar Status de Texto</button>
+                </div>
+                <div>
+                    <label for="statusMediaUrl">URL da Mídia para Status:</label>
+                    <input type="text" id="statusMediaUrl" placeholder="https://.../imagem.jpg">
+                    <label for="statusMediaCaption">Legenda do Status:</label>
+                    <input type="text" id="statusMediaCaption" placeholder="Legenda do status (opcional)">
+                    <button onclick="sendStatusMedia('image')">Enviar Status de Imagem</button>
+                    <button onclick="sendStatusMedia('video')">Enviar Status de Vídeo</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="response-area">
+        <h2>Resposta da API</h2>
+        <textarea id="response" readonly></textarea>
+    </div>
+</div>
+
+<script>
+    function getBaseUrl() {
+        const customUrl = document.getElementById('apiUrl').value.trim();
+        // Se a URL personalizada estiver vazia, retorna a origem da janela (padrão).
+        // Senão, usa a URL personalizada.
+        return customUrl || window.location.origin;
+    }
+
+    async function makeRequest(endpoint, method = 'GET', body = null) {
+        const apiKey = document.getElementById('apiKey').value;
+        const responseArea = document.getElementById('response');
+        
+        responseArea.value = `Enviando ${method} para ${endpoint}...\n\n`;
+        if (body) {
+            responseArea.value += `Corpo da Requisição:\n${JSON.stringify(body, null, 2)}\n\n---\n\n`;
+        }
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiKey) {
+            headers['apikey'] = apiKey;
+        }
+
+        const config = { method, headers };
+        if (body) {
+            config.body = JSON.stringify(body);
+        }
+
+        try {
+            const response = await fetch(`${getBaseUrl()}${endpoint}`, config);
+            const responseText = await response.text();
+            
+            let data;
+            try {
+                data = JSON.parse(responseText);
+                responseArea.value += `Status: ${response.status}\n\nResposta:\n${JSON.stringify(data, null, 2)}`;
+            } catch (e) {
+                data = responseText;
+                responseArea.value += `Status: ${response.status}\n\nResposta (não-JSON):\n${data}`;
+            }
+            
+            if (data && data.base64 && data.connected === false) {
+                const qrWindow = window.open("", "QR Code", "width=400,height=400");
+                qrWindow.document.write(`<html><head><title>QR Code</title></head><body style="text-align:center;"><p>Escaneie com seu WhatsApp:</p><img src="${data.base64}" alt="QR Code" style="width:100%;"></body></html>`);
+            }
+            if (data && data.code) {
+                 document.getElementById('pairing-code-display').textContent = data.code;
+            }
+
+        } catch (error) {
+            responseArea.value = `Erro na requisição: ${error.message}`;
+        }
+    }
+
+    // --- Instância ---
+    function createInstance() {
+        const instanceName = document.getElementById('instanceName').value;
+        makeRequest('/v1/instance/create', 'POST', { instanceName });
+    }
+    function listInstances() { makeRequest('/v1/instance/fetchInstances', 'GET'); }
+    function getInstanceQR() { makeRequest(`/v1/instance/connect/${document.getElementById('instanceName').value}`, 'GET'); }
+    function getInstanceStatus() { makeRequest(`/v1/instance/connectionState/${document.getElementById('instanceName').value}`, 'GET'); }
+    function disconnectInstance() {
+        const instanceName = document.getElementById('instanceName').value;
+        if (confirm(`Tem certeza que deseja desconectar a instância "${instanceName}"?`)) {
+            makeRequest(`/v1/instance/logout/${instanceName}`, 'DELETE');
+        }
+    }
+    function deleteInstance() {
+        const instanceName = document.getElementById('instanceName').value;
+        if (confirm(`ATENÇÃO: Isso apagará permanentemente a instância "${instanceName}" e sua sessão. Deseja continuar?`)) {
+            makeRequest(`/v1/instance/delete/${instanceName}`, 'DELETE');
+        }
+    }
+    function getPairingCode() {
+        const instanceName = document.getElementById('instanceName').value;
+        const phoneNumber = document.getElementById('phoneNumber').value;
+        makeRequest(`/v1/instance/${instanceName}/pairing`, 'POST', { phoneNumber });
+    }
+
+    // --- Configurações ---
+    function updateReadSettings() {
+        const instanceName = document.getElementById('instanceName').value;
+        const body = {
+            id: instanceName,
+            autoReadMessages: document.getElementById('autoReadMessages').checked,
+            readDelay: parseInt(document.getElementById('readDelay').value, 10)
+        };
+        makeRequest(`/v1/instance/${instanceName}/read-settings`, 'PUT', body);
+    }
+    function updateWebhook() {
+        const instanceName = document.getElementById('instanceName').value;
+        const events = Array.from(document.querySelectorAll('input[name="webhook_events"]:checked')).map(cb => cb.value);
+        const body = {
+            url: document.getElementById('webhookUrl').value,
+            byEvents: true,
+            events: events
+        };
+        makeRequest(`/v1/instance/${instanceName}/webhook`, 'PUT', body);
+    }
+
+    // --- Ações de Chat ---
+    function sendPresence(type) {
+        const instanceName = document.getElementById('instanceName').value;
+        const number = document.getElementById('chatNumber').value;
+        const body = { 
+            number: number,
+            presence: 'composing',
+            type: type === 'recording' ? 'audio' : 'text'
+        };
+        makeRequest(`/v1/chat/sendPresence/${instanceName}`, 'POST', body);
+    }
+    function markAsRead() {
+        const instanceName = document.getElementById('instanceName').value;
+        const body = {
+            readMessages: [{
+                remoteJid: document.getElementById('chatNumber').value,
+                id: document.getElementById('messageId').value
+            }]
+        };
+        makeRequest(`/v1/chat/markMessageAsRead/${instanceName}`, 'POST', body);
+    }
+
+    // --- Envio de Mensagens ---
+    function sendTextMessage() {
+        const instanceName = document.getElementById('instanceName').value;
+        const body = {
+            number: document.getElementById('recipientNumber').value,
+            text: document.getElementById('textMessage').value
+        };
+        makeRequest(`/v1/message/sendText/${instanceName}`, 'POST', body);
+    }
+    function sendMedia(type) {
+        const instanceName = document.getElementById('instanceName').value;
+        const body = {
+            instanceId: instanceName,
+            number: document.getElementById('recipientNumber').value,
+            media: document.getElementById('mediaUrl').value,
+            caption: document.getElementById('mediaCaption').value,
+            viewOnce: document.getElementById('viewOnce').checked,
+            fileName: document.getElementById('mediaUrl').value.split('/').pop() // Adiciona fileName para documentos
+        };
+        
+        // As rotas de mídia agora são mais específicas
+        let endpoint = `/v1/instance/${instanceName}/message/${type}`;
+        if (type === 'audio') {
+            body.audio = body.media; // O endpoint de áudio espera o campo "audio"
+        }
+        
+        makeRequest(endpoint, 'POST', body);
+    }
+    
+    // --- Envio de Status ---
+    function sendStatusText() {
+        const instanceName = document.getElementById('instanceName').value;
+        const body = {
+            instanceId: instanceName,
+            text: document.getElementById('statusText').value,
+            background: document.getElementById('statusBackground').value
+        };
+        makeRequest(`/v1/instance/${instanceName}/status/text`, 'POST', body);
+    }
+    function sendStatusMedia(type) {
+        const instanceName = document.getElementById('instanceName').value;
+        const body = {
+            instanceId: instanceName,
+            media: document.getElementById('statusMediaUrl').value,
+            caption: document.getElementById('statusMediaCaption').value
+        };
+        makeRequest(`/v1/instance/${instanceName}/status/${type}`, 'POST', body);
+    }
+</script>
+
+</body>
+</html>

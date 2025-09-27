@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -70,6 +72,8 @@ func (s *ConverterService) ProcessMedia(ctx context.Context, url string, mediaTy
 		}
 	case "audio":
 		task = func(ctx context.Context) ([]byte, error) {
+			// A função de áudio agora retorna mais dados, mas para compatibilidade
+			// com a interface genérica, descartamos os extras aqui.
 			converted, _, _, err := s.convertToOpus(ctx, originalData)
 			return converted, err
 		}
@@ -89,6 +93,16 @@ func (s *ConverterService) ProcessMedia(ctx context.Context, url string, mediaTy
 	case result := <-resultChan:
 		return result.data, result.err
 	}
+}
+
+// ProcessAudio é uma função especializada para áudio que retorna metadados adicionais.
+func (s *ConverterService) ProcessAudio(ctx context.Context, url string) ([]byte, []byte, float64, error) {
+	originalData, err := s.download(ctx, url)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("download failed: %w", err)
+	}
+
+	return s.convertToOpus(ctx, originalData)
 }
 
 func (s *ConverterService) download(ctx context.Context, url string) ([]byte, error) {
@@ -161,33 +175,98 @@ func (s *ConverterService) convertToWebpFFmpeg(ctx context.Context, input []byte
 	return outBuffer.Bytes(), nil
 }
 
-func (s *ConverterService) convertToOpus(ctx context.Context, input []byte) ([]byte, []byte, float64, error) {
-	cmd := exec.CommandContext(ctx, "ffmpeg",
-		"-hide_banner",
-		"-loglevel", "error",
-
+// FIX: A função foi completamente reescrita para extrair duração e gerar a waveform.
+func (s *ConverterService) convertToOpus(ctx context.Context, input []byte) (opusData []byte, waveform []byte, duration float64, err error) {
+	// Etapa 1: Extrair a duração do áudio com ffprobe
+	durationCmd := exec.CommandContext(ctx, "ffprobe",
 		"-i", "pipe:0",
-		"-c:a", "libopus",
-		"-b:a", "128k",
-		"-vbr", "on",
-		"-compression_level", "10",
-		"-application", "voip",
-		"-ar", "48000",
-		"-ac", "1",
-		"-f", "opus",
+		"-show_entries", "format=duration",
+		"-v", "quiet",
+		"-of", "csv=p=0",
+	)
+	durationCmd.Stdin = bytes.NewReader(input)
+	var durationOut bytes.Buffer
+	durationCmd.Stdout = &durationOut
+	if err = durationCmd.Run(); err != nil {
+		return nil, nil, 0, fmt.Errorf("ffprobe failed to get duration: %w", err)
+	}
+	duration, _ = strconv.ParseFloat(strings.TrimSpace(durationOut.String()), 64)
+
+	// Etapa 2: Converter o áudio principal para Opus
+	opusCmd := exec.CommandContext(ctx, "ffmpeg",
+		"-hide_banner", "-loglevel", "error",
+		"-i", "pipe:0",
+		"-c:a", "libopus", "-b:a", "128k", "-vbr", "on",
+		"-compression_level", "10", "-application", "voip",
+		"-ar", "48000", "-ac", "1",
+		"-f", "opus", "pipe:1",
+	)
+	opusCmd.Stdin = bytes.NewReader(input)
+	var opusBuffer, opusErrBuffer bytes.Buffer
+	opusCmd.Stdout = &opusBuffer
+	opusCmd.Stderr = &opusErrBuffer
+	if err = opusCmd.Run(); err != nil {
+		return nil, nil, 0, fmt.Errorf("ffmpeg opus conversion error: %v, stderr: %s", err, opusErrBuffer.String())
+	}
+	opusData = opusBuffer.Bytes()
+
+	// Etapa 3: Gerar dados brutos para a waveform
+	waveformCmd := exec.CommandContext(ctx, "ffmpeg",
+		"-hide_banner", "-loglevel", "error",
+		"-i", "pipe:0",
+		"-f", "s8", // Formato de 8-bit assinado
+		"-ar", "8000", // Baixa taxa de amostragem
+		"-ac", "1", // Mono
 		"pipe:1",
 	)
-	cmd.Stdin = bytes.NewReader(input)
-	var outBuffer, errBuffer bytes.Buffer
-	cmd.Stdout = &outBuffer
-	cmd.Stderr = &errBuffer
-
-	if err := cmd.Run(); err != nil {
-		return nil, nil, 0, fmt.Errorf("ffmpeg error: %v, stderr: %s", err, errBuffer.String())
+	waveformCmd.Stdin = bytes.NewReader(input)
+	var waveformBuffer, waveformErrBuffer bytes.Buffer
+	waveformCmd.Stdout = &waveformBuffer
+	waveformCmd.Stderr = &waveformErrBuffer
+	if err = waveformCmd.Run(); err != nil {
+		return nil, nil, 0, fmt.Errorf("ffmpeg waveform generation error: %v, stderr: %s", err, waveformErrBuffer.String())
 	}
 
-	// Para manter a compatibilidade com a assinatura da função antiga,
-	// retornamos waveform e duration vazios/zero por enquanto.
-	// A lógica de extração pode ser adicionada aqui se necessário.
-	return outBuffer.Bytes(), []byte{}, 0, nil
+	// Etapa 4: Amostrar os dados brutos para criar a waveform final (64 barras)
+	rawData := waveformBuffer.Bytes()
+	totalSamples := len(rawData)
+	samplesPerBar := totalSamples / 64
+	if samplesPerBar == 0 {
+		samplesPerBar = 1
+	}
+
+	finalWaveform := make([]byte, 64)
+	for i := 0; i < 64; i++ {
+		start := i * samplesPerBar
+		end := start + samplesPerBar
+		if end > totalSamples {
+			end = totalSamples
+		}
+		if start >= end {
+			if i > 0 {
+				finalWaveform[i] = finalWaveform[i-1] // Evita barras vazias no final
+			}
+			continue
+		}
+
+		// Encontra o valor de pico (amplitude máxima) no segmento
+		var peak byte
+		for _, sample := range rawData[start:end] {
+			val := sample
+			if val > 128 { // Normaliza valores negativos
+				val = 255 - val
+			}
+			if val > peak {
+				peak = val
+			}
+		}
+		// Limita o valor máximo para a visualização
+		if peak > 100 {
+			peak = 100
+		}
+		finalWaveform[i] = peak
+	}
+	waveform = finalWaveform
+
+	return
 }

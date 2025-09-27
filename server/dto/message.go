@@ -173,3 +173,21 @@ type SendDocumentResponseDataImage struct {
 	JpegThumbnail     string `json:"jpegThumbnail,omitempty"`
 	ContextInfo       any    `json:"contextInfo,omitempty"`
 }
+
+// FIX: Adicionando structs de resposta para imagem para garantir que a API retorne detalhes completos.
+type SendImageResponse struct {
+	Key              MessageResponseKey       `json:"key,omitempty"`
+	PushName         string                   `json:"pushName,omitempty"`
+	Status           string                   `json:"status,omitempty"`
+	Message          SendImageResponseMessage `json:"message,omitempty"`
+	ContextInfo      any                      `json:"contextInfo,omitempty"`
+	MessageType      string                   `json:"messageType,omitempty"`
+	MessageTimestamp int                      `json:"messageTimestamp,omitempty"`
+	InstanceId       string                   `json:"instanceId,omitempty"`
+	Source           string                   `json:"source,omitempty"`
+}
+
+type SendImageResponseMessage struct {
+	ImageMessage SendDocumentResponseDataImage `json:"imageMessage,omitempty"`
+	Base64       string                        `json:"base64,omitempty"`
+}

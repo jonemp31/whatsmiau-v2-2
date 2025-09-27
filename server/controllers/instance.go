@@ -368,5 +368,8 @@ func (s *Instance) UpdateWebhook(ctx echo.Context) error {
 		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, "failed to update webhook")
 	}
 
+	// FIX: Invalidar cache para aplicar configurações imediatamente
+	s.whatsmiau.InvalidateCache(instanceID)
+
 	return ctx.JSON(http.StatusOK, updatedInstance)
 }

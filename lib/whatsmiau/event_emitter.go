@@ -184,19 +184,27 @@ func (s *Whatsmiau) handleMessageEvent(id string, instance *models.Instance, e *
 		return
 	}
 
-	// Enviar confirmações automáticas para mensagens recebidas
+	// FIX: Lógica de confirmação de leitura aprimorada.
 	if !e.Info.IsFromMe && instance.AutoReadMessages {
-		// Enviar confirmação de recebimento imediatamente (✓✓)
+		// 1. Enviar confirmação de recebimento imediatamente (✓✓ cinzas)
 		go s.SendDeliveryReceipt(id, e.Info.Chat, e.Info.Sender, e.Info.ID)
 
-		// Enviar confirmação de visualização com delay (✓✓ azul)
+		// 2. Agendar a confirmação de visualização com delay (✓✓ azuis) de forma mais robusta.
 		go func() {
 			delay := time.Duration(instance.ReadDelay) * time.Second
-			if delay == 0 {
-				delay = 8 * time.Second // Delay padrão de 8 segundos
+			if delay <= 0 {
+				delay = 8 * time.Second // Garante um delay mínimo se configurado como 0.
 			}
-			time.Sleep(delay)
-			s.SendReadReceipt(id, e.Info.Chat, e.Info.Sender, e.Info.ID)
+
+			select {
+			case <-time.After(delay):
+				// O tempo passou, enviar a confirmação de leitura.
+				s.SendReadReceipt(id, e.Info.Chat, e.Info.Sender, e.Info.ID)
+			case <-s.shutdownChan:
+				// A aplicação está desligando, cancelar o envio.
+				zap.L().Info("Read receipt cancelled due to application shutdown.", zap.String("instance", id))
+				return
+			}
 		}()
 	}
 

@@ -248,12 +248,13 @@ func (s *Message) sendImage(ctx echo.Context, request dto.SendDocumentRequest) e
 		return utils.HTTPFail(ctx, http.StatusBadRequest, err, "invalid number format")
 	}
 
+	// FIX: Definir explicitamente o mimetype para "image/webp", pois o conversor sempre gera este formato.
 	sendData := &whatsmiau.SendImageRequest{
 		InstanceID: request.InstanceID,
 		MediaURL:   request.Media,
 		Caption:    request.Caption,
 		RemoteJID:  jid,
-		Mimetype:   request.Mimetype,
+		Mimetype:   "image/webp",
 		ViewOnce:   request.ViewOnce,
 	}
 
@@ -276,17 +277,26 @@ func (s *Message) sendImage(ctx echo.Context, request dto.SendDocumentRequest) e
 
 	res, err := s.whatsmiau.SendImage(c, sendData)
 	if err != nil {
-		zap.L().Error("Whatsmiau.SendDocument failed", zap.Error(err))
-		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, "failed to send document")
+		// FIX: Corrigindo a mensagem de log e de erro para ser específica para imagem.
+		zap.L().Error("Whatsmiau.SendImage failed", zap.Error(err))
+		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, "failed to send image")
 	}
 
-	return ctx.JSON(http.StatusOK, dto.SendDocumentResponse{
+	// FIX: Usando o novo DTO de resposta para imagem para retornar uma resposta completa e correta.
+	return ctx.JSON(http.StatusOK, dto.SendImageResponse{
 		Key: dto.MessageResponseKey{
 			RemoteJid: request.Number,
 			FromMe:    true,
 			Id:        res.ID,
 		},
-		Status:           "sent",
+		Status: "sent",
+		Message: dto.SendImageResponseMessage{
+			ImageMessage: dto.SendDocumentResponseDataImage{
+				Url:      request.Media,
+				Mimetype: sendData.Mimetype,
+				Caption:  request.Caption,
+			},
+		},
 		MessageType:      "imageMessage",
 		MessageTimestamp: int(res.CreatedAt.Unix() / 1000),
 		InstanceId:       request.InstanceID,

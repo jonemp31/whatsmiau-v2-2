@@ -77,6 +77,14 @@ func (s *RedisInstance) Update(ctx context.Context, id string, toUpdate *models.
 		oldInstance.Webhook.Base64 = toUpdate.Webhook.Base64
 	}
 
+	// FIX: Corrigir a lógica de merge para incluir todas as configurações de webhook.
+	// A verificação de 'Events != nil' distingue uma chamada de 'UpdateWebhook' de outras chamadas de 'Update'.
+	if toUpdate.Webhook.Events != nil {
+		oldInstance.Webhook.Url = toUpdate.Webhook.Url
+		oldInstance.Webhook.ByEvents = toUpdate.Webhook.ByEvents
+		oldInstance.Webhook.Events = toUpdate.Webhook.Events
+	}
+
 	// Atualizar configurações de leitura se fornecidas
 	if toUpdate.AutoReadMessages != false || toUpdate.ReadDelay != 0 {
 		oldInstance.AutoReadMessages = toUpdate.AutoReadMessages

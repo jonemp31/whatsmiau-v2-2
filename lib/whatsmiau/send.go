@@ -88,7 +88,8 @@ func (s *Whatsmiau) SendAudio(ctx context.Context, data *SendAudio) (*SendAudioR
 		return nil, whatsmeow.ErrClientIsNil
 	}
 
-	convertedBytes, err := s.converter.ProcessMedia(ctx, data.AudioURL, "audio")
+	// FIX: Usar a função especializada para áudio que retorna metadados adicionais
+	convertedBytes, waveform, duration, err := s.converter.ProcessAudio(ctx, data.AudioURL)
 	if err != nil {
 		zap.L().Error("failed to process audio with converter service", zap.Error(err))
 		return nil, err
@@ -104,12 +105,12 @@ func (s *Whatsmiau) SendAudio(ctx context.Context, data *SendAudio) (*SendAudioR
 		Mimetype:      proto.String("audio/ogg; codecs=opus"),
 		FileSHA256:    uploaded.FileSHA256,
 		FileLength:    proto.Uint64(uploaded.FileLength),
-		Seconds:       proto.Uint32(0), // Duração não é mais calculada, pode ser adicionada no futuro
+		Seconds:       proto.Uint32(uint32(duration)), // FIX: Usar duração real extraída
 		PTT:           proto.Bool(true),
 		MediaKey:      uploaded.MediaKey,
 		FileEncSHA256: uploaded.FileEncSHA256,
 		DirectPath:    proto.String(uploaded.DirectPath),
-		Waveform:      nil, // Waveform não é mais calculado, pode ser adicionado no futuro
+		Waveform:      waveform, // FIX: Usar waveform real gerada
 		ViewOnce:      proto.Bool(data.ViewOnce),
 	}
 
@@ -213,9 +214,16 @@ func (s *Whatsmiau) SendImage(ctx context.Context, data *SendImageRequest) (*Sen
 		return nil, err
 	}
 
+	// FIX: Utilizando o mimetype passado pelo controller, com um fallback seguro.
+	mimetype := data.Mimetype
+	if mimetype == "" {
+		// O conversor sempre gera webp, então este é um fallback seguro.
+		mimetype = "image/webp"
+	}
+
 	doc := waE2E.ImageMessage{
 		URL:           proto.String(uploaded.URL),
-		Mimetype:      proto.String("image/webp"),
+		Mimetype:      proto.String(mimetype),
 		Caption:       proto.String(data.Caption),
 		FileSHA256:    uploaded.FileSHA256,
 		FileLength:    proto.Uint64(uploaded.FileLength),

@@ -335,15 +335,16 @@ func (s *Whatsmiau) extractJidLid(ctx context.Context, id string, jid types.JID)
 	return jid.ToNonAD().String(), ""
 }
 
-// SendDeliveryReceipt envia confirmação de recebimento (✓✓)
+// SendDeliveryReceipt envia confirmação de recebimento (✓✓ cinzas)
 func (s *Whatsmiau) SendDeliveryReceipt(instanceID string, chatJID types.JID, senderJID types.JID, messageID string) error {
 	client, ok := s.clients.Load(instanceID)
 	if !ok {
 		return whatsmeow.ErrClientIsNil
 	}
 
-	// Marcar mensagem como entregue usando MarkRead
-	err := client.MarkRead([]string{messageID}, time.Now(), chatJID, senderJID)
+	// FIX: Usando a função correta para confirmação de ENTREGA.
+	// Para confirmação de entrega, usamos MarkRead com timestamp vazio
+	err := client.MarkRead([]string{messageID}, time.Time{}, chatJID, senderJID)
 
 	if err != nil {
 		zap.L().Error("failed to send delivery receipt",
@@ -362,7 +363,7 @@ func (s *Whatsmiau) SendReadReceipt(instanceID string, chatJID types.JID, sender
 		return whatsmeow.ErrClientIsNil
 	}
 
-	// A função MarkRead está correta para marcar como "lida"
+	// A função MarkRead está correta para marcar como "lida" (azul).
 	err := client.MarkRead([]string{messageID}, time.Now(), chatJID, senderJID)
 
 	if err != nil {
@@ -413,4 +414,10 @@ func (s *Whatsmiau) PairPhone(ctx context.Context, instanceID, phoneNumber strin
 	formattedCode := fmt.Sprintf("%s-%s", code[:4], code[4:])
 
 	return formattedCode, nil
+}
+
+// InvalidateCache remove uma instância do cache para forçar recarregamento
+func (s *Whatsmiau) InvalidateCache(instanceID string) {
+	s.instanceCache.Delete(instanceID)
+	zap.L().Info("Instance cache invalidated", zap.String("instance", instanceID))
 }
