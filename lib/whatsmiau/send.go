@@ -80,6 +80,7 @@ type SendAudio struct {
 type SendAudioResponse struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
+	Seconds   uint32    `json:"seconds"`
 }
 
 func (s *Whatsmiau) SendAudio(ctx context.Context, data *SendAudio) (*SendAudioResponse, error) {
@@ -124,6 +125,7 @@ func (s *Whatsmiau) SendAudio(ctx context.Context, data *SendAudio) (*SendAudioR
 	return &SendAudioResponse{
 		ID:        res.ID,
 		CreatedAt: res.Timestamp,
+		Seconds:   uint32(duration),
 	}, nil
 }
 

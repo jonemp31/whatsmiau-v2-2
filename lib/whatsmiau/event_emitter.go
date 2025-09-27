@@ -67,6 +67,24 @@ func (s *Whatsmiau) getInstanceCached(id string) *models.Instance {
 	return &res[0]
 }
 
+// EmitConnectionEvent dispara um webhook de atualização de status de conexão.
+// Esta função é pública para ser chamada durante a inicialização da aplicação.
+func (s *Whatsmiau) EmitConnectionEvent(id string, state Status) {
+	instance := s.getInstanceCached(id)
+	if instance == nil {
+		zap.L().Warn("no instance found for connection event", zap.String("instance", id), zap.String("state", string(state)))
+		return
+	}
+
+	eventMap := make(map[string]bool)
+	for _, event := range instance.Webhook.Events {
+		eventMap[event] = true
+	}
+
+	// Reutiliza a lógica interna de disparo de evento.
+	s.handleConnectionEvent(id, instance, string(state), eventMap)
+}
+
 func (s *Whatsmiau) startEmitter() {
 	for event := range s.emitter {
 		data, err := json.Marshal(event.data)
@@ -148,6 +166,29 @@ func (s *Whatsmiau) Handle(id string) whatsmeow.EventHandler {
 
 			switch e := evt.(type) {
 			case *events.Connected:
+				// FIX: Centralizar a lógica de pós-conexão para garantir persistência da sessão
+				// Verifica se é a primeira conexão (RemoteJID ainda não foi salvo)
+				if instance.RemoteJID == "" {
+					// Busca o cliente para obter o RemoteJID
+					client, ok := s.clients.Load(id)
+					if ok && client.Store.ID != nil {
+						// Salva o RemoteJID no Redis para persistir a sessão
+						_, err := s.repo.Update(context.Background(), id, &models.Instance{
+							RemoteJID: client.Store.ID.String(),
+						})
+						if err != nil {
+							zap.L().Error("failed to save RemoteJID after connection",
+								zap.String("instance", id),
+								zap.String("remoteJID", client.Store.ID.String()),
+								zap.Error(err))
+						} else {
+							zap.L().Info("RemoteJID saved successfully",
+								zap.String("instance", id),
+								zap.String("remoteJID", client.Store.ID.String()))
+						}
+					}
+				}
+
 				s.handleConnectionEvent(id, instance, "open", eventMap)
 				zap.L().Info("Connected successfully", zap.String("instance", id))
 			case *events.Disconnected:

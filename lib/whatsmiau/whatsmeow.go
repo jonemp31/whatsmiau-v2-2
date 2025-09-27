@@ -128,11 +128,49 @@ func LoadMiau(ctx context.Context, container *sqlstore.Container, converterSvc *
 
 	go instance.startEmitter()
 
-	clients.Range(func(id string, client *whatsmeow.Client) bool {
-		zap.L().Info("stating event handler", zap.String("jid", client.Store.ID.String()))
-		client.AddEventHandler(instance.Handle(id))
-		return true
-	})
+	deviceStore, err = container.GetAllDevices(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	instanceList, err = repo.List(ctx, "")
+	if err != nil {
+		zap.L().Fatal("Failed to list instances", zap.Error(err))
+	}
+	instanceByRemoteJid = make(map[string]models.Instance)
+	for _, inst := range instanceList {
+		if len(inst.RemoteJID) <= 0 {
+			continue
+		}
+		instanceByRemoteJid[inst.RemoteJID] = inst
+	}
+
+	for _, device := range deviceStore {
+		if device.ID == nil {
+			continue
+		}
+
+		instanceFound, ok := instanceByRemoteJid[device.ID.String()]
+		if !ok {
+			zap.L().Warn("Orphaned device found in store, deleting.", zap.String("jid", device.ID.String()))
+			_ = container.DeleteDevice(ctx, device) // Clean up
+			continue
+		}
+
+		client := whatsmeow.NewClient(device, instance.logger)
+
+		// FIX: Anexar o manipulador ANTES de conectar para evitar perder eventos.
+		client.AddEventHandler(instance.Handle(instanceFound.ID))
+		instance.clients.Store(instanceFound.ID, client)
+
+		// FIX: Emitir 'connecting' manualmente para notificar o início da tentativa de reconexão.
+		go instance.EmitConnectionEvent(instanceFound.ID, Connecting)
+
+		if err := client.Connect(); err != nil {
+			zap.L().Error("failed to initiate connection for device", zap.Error(err), zap.String("jid", device.ID.String()))
+			// O evento de Desconexão será disparado pelo manipulador se a conexão falhar.
+		}
+	}
 
 }
 
@@ -210,11 +248,8 @@ func (s *Whatsmiau) observeConnection(client *whatsmeow.Client, id string) {
 				} else {
 					client.RemoveEventHandlers()
 					client.AddEventHandler(s.Handle(id))
-					if _, err := s.repo.Update(context.Background(), id, &models.Instance{
-						RemoteJID: client.Store.ID.String(),
-					}); err != nil {
-						zap.L().Error("failed to update instance after login", zap.Error(err))
-					}
+					// FIX: Removida a lógica redundante de atualização do RemoteJID
+					// Agora centralizada no evento Connected para evitar inconsistências
 				}
 				return
 			}

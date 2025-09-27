@@ -190,7 +190,16 @@ func (s *ConverterService) convertToOpus(ctx context.Context, input []byte) (opu
 	if err = durationCmd.Run(); err != nil {
 		return nil, nil, 0, fmt.Errorf("ffprobe failed to get duration: %w", err)
 	}
-	duration, _ = strconv.ParseFloat(strings.TrimSpace(durationOut.String()), 64)
+	durationStr := strings.TrimSpace(durationOut.String())
+	duration, err = strconv.ParseFloat(durationStr, 64)
+	if err != nil {
+		// Adiciona log detalhado em caso de falha na conversão da duração,
+		// mas permite que o envio continue com duração 0 para não quebrar o fluxo.
+		zap.L().Error("failed to parse audio duration from ffprobe",
+			zap.Error(err),
+			zap.String("ffprobe_output", durationStr))
+		duration = 0 // Define como 0 em caso de erro, mas loga o problema.
+	}
 
 	// Etapa 2: Converter o áudio principal para Opus
 	opusCmd := exec.CommandContext(ctx, "ffmpeg",

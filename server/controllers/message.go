@@ -148,7 +148,11 @@ func (s *Message) SendAudio(ctx echo.Context) error {
 			FromMe:    true,
 			Id:        res.ID,
 		},
-
+		Message: dto.SendAudioResponseMessage{
+			AudioMessage: dto.SendAudioResponseMessageAudio{
+				Seconds: int(res.Seconds),
+			},
+		},
 		Status:           "sent",
 		MessageType:      "audioMessage",
 		MessageTimestamp: int(res.CreatedAt.Unix() / 1000),
