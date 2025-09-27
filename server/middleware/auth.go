@@ -5,16 +5,26 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/verbeux-ai/whatsmiau/env"
+	"go.uber.org/zap"
 )
 
 func Auth(ctx echo.Context, next echo.HandlerFunc) error {
 	gotApikey := ctx.Request().Header.Get("apikey")
+
+	// Em produção, sempre exigir API_KEY configurada
 	if len(env.Env.ApiKey) == 0 {
+		zap.L().Warn("API_KEY not configured - allowing all requests (INSECURE)")
 		return next(ctx)
 	}
 
+	if gotApikey == "" {
+		zap.L().Warn("request without API key", zap.String("ip", ctx.RealIP()))
+		return echo.NewHTTPError(http.StatusUnauthorized, "API key required")
+	}
+
 	if gotApikey != env.Env.ApiKey {
-		return echo.NewHTTPError(http.StatusUnauthorized)
+		zap.L().Warn("invalid API key", zap.String("ip", ctx.RealIP()))
+		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid API key")
 	}
 
 	return next(ctx)

@@ -37,6 +37,7 @@ type Whatsmiau struct {
 	fileStorage      interfaces.Storage
 	handlerSemaphore chan struct{}
 	converter        *converter.ConverterService
+	shutdownChan     chan struct{}
 }
 
 var instance *Whatsmiau
@@ -122,6 +123,7 @@ func LoadMiau(ctx context.Context, container *sqlstore.Container, converterSvc *
 		fileStorage:      storage,
 		handlerSemaphore: make(chan struct{}, env.Env.HandlerSemaphoreSize),
 		converter:        converterSvc,
+		shutdownChan:     make(chan struct{}),
 	}
 
 	go instance.startEmitter()
@@ -159,13 +161,16 @@ func (s *Whatsmiau) Connect(ctx context.Context, id string) (string, error) {
 }
 
 func (s *Whatsmiau) observeConnection(client *whatsmeow.Client, id string) {
-	if _, ok := s.observerRunning.Load(id); ok {
+	// Usar LoadOrStore para operação atômica e evitar race condition
+	if _, loaded := s.observerRunning.LoadOrStore(id, true); loaded {
+		zap.L().Debug("observer already running for instance", zap.String("instance", id))
 		return
 	}
-	s.observerRunning.Store(id, true)
+
 	defer func() {
 		s.observerRunning.Delete(id)
 		s.qrCache.Delete(id)
+		zap.L().Debug("observer cleanup completed", zap.String("instance", id))
 	}()
 
 	qrChan, err := client.GetQRChannel(context.Background())
@@ -218,7 +223,8 @@ func (s *Whatsmiau) observeConnection(client *whatsmeow.Client, id string) {
 }
 
 func (s *Whatsmiau) observeAndQrCode(ctx context.Context, id string, client *whatsmeow.Client) (string, error) {
-	ctx, c := context.WithTimeout(ctx, 15*time.Second)
+	// Aumentar timeout para 60 segundos - QR code pode demorar para ser gerado
+	ctx, c := context.WithTimeout(ctx, 60*time.Second)
 	defer c()
 
 	go s.observeConnection(client, id)
@@ -231,9 +237,11 @@ func (s *Whatsmiau) observeAndQrCode(ctx context.Context, id string, client *wha
 		case <-ticker.C:
 			qrCode, ok := s.qrCache.Load(id)
 			if ok && len(qrCode) > 0 {
+				zap.L().Info("QR code generated successfully", zap.String("instance", id))
 				return qrCode, nil
 			}
 		case <-ctx.Done():
+			zap.L().Warn("QR code generation timeout", zap.String("instance", id), zap.Error(ctx.Err()))
 			return "", ctx.Err()
 		}
 	}
@@ -334,8 +342,8 @@ func (s *Whatsmiau) SendDeliveryReceipt(instanceID string, chatJID types.JID, se
 		return whatsmeow.ErrClientIsNil
 	}
 
-	// Usa SendReceipt para marcar apenas como "entregue"
-	err := client.SendReceipt(chatJID, senderJID, []string{messageID}, "")
+	// Marcar mensagem como entregue usando MarkRead
+	err := client.MarkRead([]string{messageID}, time.Now(), chatJID, senderJID)
 
 	if err != nil {
 		zap.L().Error("failed to send delivery receipt",

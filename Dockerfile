@@ -21,7 +21,7 @@ WORKDIR /app
 
 COPY --from=builder /app/whatsmiau /app/whatsmiau
 COPY logo.png .
-COPY .env.example .env
+COPY env.example .env
 
 EXPOSE 8080
 

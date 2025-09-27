@@ -80,10 +80,13 @@ func (s *Instance) Update(ctx echo.Context) error {
 	}
 
 	c := ctx.Request().Context()
+
+	// Simplificar a validação do webhook
+	base64Value := request.Webhook.Base64
 	instance, err := s.repo.Update(c, request.ID, &models.Instance{
 		ID: request.ID,
 		Webhook: models.InstanceWebhook{
-			Base64: &[]bool{request.Webhook.Base64}[0],
+			Base64: &base64Value,
 		},
 	})
 	if err != nil {

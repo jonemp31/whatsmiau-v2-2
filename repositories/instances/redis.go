@@ -1,6 +1,7 @@
 package instances
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,7 +9,6 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/verbeux-ai/whatsmiau/interfaces"
 	"github.com/verbeux-ai/whatsmiau/models"
-	"golang.org/x/net/context"
 )
 
 // These verify if RedisInstance follows instances interface pattern
@@ -67,19 +67,33 @@ func (s *RedisInstance) Update(ctx context.Context, id string, toUpdate *models.
 	}
 
 	oldInstance := result[0]
+
+	// Aplicar atualizações apenas se os campos não estiverem vazios/nulos
 	if len(toUpdate.RemoteJID) > 0 {
 		oldInstance.RemoteJID = toUpdate.RemoteJID
 	}
+
 	if toUpdate.Webhook.Base64 != nil {
 		oldInstance.Webhook.Base64 = toUpdate.Webhook.Base64
 	}
 
-	data, err := json.Marshal(oldInstance)
-	if err != nil {
-		return nil, err
+	// Atualizar configurações de leitura se fornecidas
+	if toUpdate.AutoReadMessages != false || toUpdate.ReadDelay != 0 {
+		oldInstance.AutoReadMessages = toUpdate.AutoReadMessages
+		oldInstance.ReadDelay = toUpdate.ReadDelay
 	}
 
-	return &oldInstance, s.db.Set(ctx, s.key(id), data, redis.KeepTTL).Err()
+	data, err := json.Marshal(oldInstance)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal instance: %w", err)
+	}
+
+	err = s.db.Set(ctx, s.key(id), data, redis.KeepTTL).Err()
+	if err != nil {
+		return nil, fmt.Errorf("failed to update instance in redis: %w", err)
+	}
+
+	return &oldInstance, nil
 }
 
 func (s *RedisInstance) List(ctx context.Context, id string) ([]models.Instance, error) {

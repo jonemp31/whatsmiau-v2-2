@@ -39,7 +39,8 @@ func (s *Whatsmiau) getInstanceCached(id string) *models.Instance {
 
 	res, err := s.repo.List(ctx, id)
 	if err != nil {
-		zap.L().Panic("failed to get instanceCached by instance", zap.Error(err))
+		zap.L().Error("failed to get instanceCached by instance", zap.Error(err), zap.String("instance", id))
+		return nil
 	}
 
 	if len(res) == 0 {
@@ -48,10 +49,19 @@ func (s *Whatsmiau) getInstanceCached(id string) *models.Instance {
 	}
 
 	s.instanceCache.Store(id, res[0])
+
+	// Usar context controlado para evitar goroutines órfãs
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	go func() {
-		// expires in 10sec
-		time.Sleep(time.Second * 10)
-		s.instanceCache.Delete(id)
+		defer cancel()
+		select {
+		case <-ctx.Done():
+			s.instanceCache.Delete(id)
+			zap.L().Debug("instance cache expired", zap.String("instance", id))
+		case <-s.shutdownChan:
+			// Aplicação está sendo desligada, não fazer nada
+			return
+		}
 	}()
 
 	return &res[0]
@@ -139,16 +149,9 @@ func (s *Whatsmiau) Handle(id string) whatsmeow.EventHandler {
 			switch e := evt.(type) {
 			case *events.Connected:
 				s.handleConnectionEvent(id, instance, "open", eventMap)
+				zap.L().Info("Connected successfully", zap.String("instance", id))
 			case *events.Disconnected:
 				s.handleConnectionEvent(id, instance, "closed", eventMap)
-			case *events.LoggedIn:
-				zap.L().Info("Login successful!", zap.String("instance", id), zap.String("jid", e.JID.String()))
-				// Atualiza o RemoteJID no repositório após o login bem-sucedido
-				if _, err := s.repo.Update(context.Background(), id, &models.Instance{
-					RemoteJID: e.JID.String(),
-				}); err != nil {
-					zap.L().Error("failed to update instance after login", zap.Error(err))
-				}
 			case *events.Message:
 				s.handleMessageEvent(id, instance, e, eventMap)
 			case *events.Receipt:
@@ -236,9 +239,9 @@ func (s *Whatsmiau) handleReceiptEvent(id string, instance *models.Instance, e *
 		return
 	}
 
-	wookReceipt := &WookEvent[WookReceiptData]{
+	wookReceipt := &WookEvent[[]WookMessageUpdateData]{
 		Instance: id,
-		Data:     data,
+		Data:     &data,
 		DateTime: time.Now(),
 		Event:    WookMessagesUpdate,
 	}
@@ -290,7 +293,7 @@ func (s *Whatsmiau) handleContactEvent(id string, instance *models.Instance, e *
 		return
 	}
 
-	wookContact := &WookEvent[WookContactData]{
+	wookContact := &WookEvent[WookContact]{
 		Instance: id,
 		Data:     data,
 		DateTime: time.Now(),
@@ -318,7 +321,7 @@ func (s *Whatsmiau) handlePictureEvent(id string, instance *models.Instance, e *
 		return
 	}
 
-	wookPicture := &WookEvent[WookPictureData]{
+	wookPicture := &WookEvent[WookContact]{
 		Instance: id,
 		Data:     data,
 		DateTime: time.Now(),
@@ -346,9 +349,9 @@ func (s *Whatsmiau) handleHistorySyncEvent(id string, instance *models.Instance,
 		return
 	}
 
-	wookHistory := &WookEvent[WookHistorySyncData]{
+	wookHistory := &WookEvent[WookContactUpsertData]{
 		Instance: id,
-		Data:     data,
+		Data:     &data,
 		DateTime: time.Now(),
 		Event:    "history.sync", // TODO: use wook const
 	}

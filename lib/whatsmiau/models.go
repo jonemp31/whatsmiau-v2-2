@@ -256,3 +256,36 @@ type WookContact struct {
 }
 
 type WookContactUpsertData []WookContact
+
+// WookReceiptData representa dados de confirmação de mensagem
+type WookReceiptData struct {
+	MessageIds  []string `json:"messageIds,omitempty"`
+	RemoteJid   string   `json:"remoteJid,omitempty"`
+	RemoteLid   string   `json:"remoteLid,omitempty"`
+	FromMe      bool     `json:"fromMe,omitempty"`
+	Participant string   `json:"participant,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	InstanceId  string   `json:"instanceId,omitempty"`
+}
+
+// WookContactData representa dados de contato
+type WookContactData struct {
+	RemoteJid     string `json:"remoteJid,omitempty"`
+	RemoteLid     string `json:"remoteLid,omitempty"`
+	PushName      string `json:"pushName,omitempty"`
+	ProfilePicUrl string `json:"profilePicUrl,omitempty"`
+	Base64Pic     string `json:"base64Pic,omitempty"`
+	InstanceId    string `json:"instanceId,omitempty"`
+}
+
+// WookPictureData representa dados de foto de perfil
+type WookPictureData struct {
+	RemoteJid     string `json:"remoteJid,omitempty"`
+	RemoteLid     string `json:"remoteLid,omitempty"`
+	ProfilePicUrl string `json:"profilePicUrl,omitempty"`
+	Base64Pic     string `json:"base64Pic,omitempty"`
+	InstanceId    string `json:"instanceId,omitempty"`
+}
+
+// WookHistorySyncData representa dados de sincronização de histórico
+type WookHistorySyncData []WookContact

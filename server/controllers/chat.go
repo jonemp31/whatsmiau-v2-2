@@ -91,15 +91,23 @@ func (s *Chat) SendChatPresence(ctx echo.Context) error {
 	}
 
 	if request.Delay > 0 {
+		// Usar contexto da requisição para controlar a goroutine
 		go func() {
-			time.Sleep(time.Duration(request.Delay) * time.Millisecond)
-			if err := s.whatsmiau.ChatPresence(&whatsmiau.ChatPresenceRequest{
-				InstanceID: request.InstanceID,
-				RemoteJID:  number,
-				Presence:   types.ChatPresencePaused,
-				Media:      types.ChatPresenceMediaText,
-			}); err != nil {
-				zap.L().Error("Whatsmiau.ReadMessages failed", zap.Error(err))
+			select {
+			case <-time.After(time.Duration(request.Delay) * time.Millisecond):
+				// Executar ação após o delay
+				if err := s.whatsmiau.ChatPresence(&whatsmiau.ChatPresenceRequest{
+					InstanceID: request.InstanceID,
+					RemoteJID:  number,
+					Presence:   types.ChatPresencePaused,
+					Media:      types.ChatPresenceMediaText,
+				}); err != nil {
+					zap.L().Error("ChatPresence failed", zap.Error(err), zap.String("instance", request.InstanceID))
+				}
+			case <-ctx.Request().Context().Done():
+				// Requisição foi cancelada, não executar ação
+				zap.L().Debug("ChatPresence delayed action cancelled", zap.String("instance", request.InstanceID))
+				return
 			}
 		}()
 	}
