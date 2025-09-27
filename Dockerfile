@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -11,18 +11,18 @@ RUN go mod download
 COPY . .
 
 # Enable CGO
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o whatsmiau main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -a -o /app/whatsmiau .
 
 FROM alpine:latest
 
-RUN apk update && apk add --no-cache ffmpeg mailcap
+RUN apk update && apk add --no-cache ffmpeg mailcap vips-dev
 
 WORKDIR /app
 
 COPY --from=builder /app/whatsmiau /app/whatsmiau
+COPY logo.png .
+COPY .env.example .env
 
-RUN mkdir /app/data && chmod 777 -R /app/data
+EXPOSE 8080
 
-EXPOSE 8081
-
-ENTRYPOINT ["./whatsmiau"]
+CMD [ "/app/whatsmiau" ]

@@ -113,5 +113,19 @@ type UpdateReadSettingsRequest struct {
 }
 
 type UpdateReadSettingsResponse struct {
-	*models.Instance
+	Instance *models.Instance `json:"instance"`
+}
+
+type PairingCodeRequest struct {
+	PhoneNumber string `json:"phoneNumber" validate:"required"`
+}
+
+type PairingCodeResponse struct {
+	Code string `json:"code"`
+}
+
+type UpdateWebhookRequest struct {
+	Url      string   `json:"url"`
+	ByEvents bool     `json:"byEvents"`
+	Events   []string `json:"events"`
 }

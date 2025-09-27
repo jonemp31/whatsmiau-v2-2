@@ -6,9 +6,10 @@ import (
 )
 
 type E struct {
-	Port           string `env:"PORT" envDefault:"8080"`
-	DebugMode      bool   `env:"DEBUG_MODE" envDefault:"false"`
-	DebugWhatsmeow bool   `env:"DEBUG_WHATSMEOW" envDefault:"false"`
+	Port             string `env:"PORT" envDefault:"8080"`
+	GlobalWebhookURL string `env:"GLOBAL_WEBHOOK_URL"`
+	DebugMode        bool   `env:"DEBUG_MODE" envDefault:"false"`
+	DebugWhatsmeow   bool   `env:"DEBUG_WHATSMEOW" envDefault:"false"`
 
 	RedisURL      string `env:"REDIS_URL" envDefault:"localhost:6379"`
 	RedisPassword string `env:"REDIS_PASSWORD"`
@@ -28,6 +29,9 @@ type E struct {
 
 	EmitterBufferSize    int `env:"EMITTER_BUFFER_SIZE" envDefault:"2048"`
 	HandlerSemaphoreSize int `env:"HANDLER_SEMAPHORE_SIZE" envDefault:"512"`
+
+	ConverterWorkers     int `env:"CONVERTER_WORKERS" envDefault:"10"`
+	ConverterHTTPTimeout int `env:"CONVERTER_HTTP_TIMEOUT" envDefault:"30"`
 }
 
 var Env E

@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/verbeux-ai/whatsmiau/env"
+	"github.com/verbeux-ai/whatsmiau/lib/converter"
 	"github.com/verbeux-ai/whatsmiau/lib/logger"
 	"github.com/verbeux-ai/whatsmiau/lib/whatsmiau"
 	"github.com/verbeux-ai/whatsmiau/server/routes"
@@ -25,9 +26,11 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	converterSvc := converter.NewConverterService(env.Env.ConverterWorkers, time.Second*time.Duration(env.Env.ConverterHTTPTimeout))
+
 	ctx, c := context.WithTimeout(context.Background(), 10*time.Second)
 	defer c()
-	whatsmiau.LoadMiau(ctx, services.SQLStore())
+	whatsmiau.LoadMiau(ctx, services.SQLStore(), converterSvc)
 
 	app := echo.New()
 	app.Pre(middleware.Recover())

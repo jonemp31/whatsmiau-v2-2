@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/verbeux-ai/whatsmiau/env"
 	"github.com/verbeux-ai/whatsmiau/models"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -93,6 +94,32 @@ func (s *Whatsmiau) emit(body any, url string) {
 	s.emitter <- emitter{url, body}
 }
 
+func (s *Whatsmiau) handleConnectionEvent(id string, instance *models.Instance, state string, eventMap map[string]bool) {
+	// Verifica se a instância está configurada para receber este evento
+	if !eventMap["CONNECTION_UPDATE"] {
+		return
+	}
+
+	wookData := &WookEvent[WookConnectionUpdateData]{
+		Instance: instance.ID,
+		Data: &WookConnectionUpdateData{
+			State: state,
+		},
+		DateTime: time.Now(),
+		Event:    WookConnectionUpdate,
+	}
+
+	zap.L().Info("Sending connection status update", zap.String("instance", id), zap.String("status", state))
+
+	// Lógica de envio Híbrido
+	if instance.Webhook.Url != "" {
+		s.emit(wookData, instance.Webhook.Url)
+	}
+	if env.Env.GlobalWebhookURL != "" {
+		s.emit(wookData, env.Env.GlobalWebhookURL)
+	}
+}
+
 func (s *Whatsmiau) Handle(id string) whatsmeow.EventHandler {
 	return func(evt any) {
 		s.handlerSemaphore <- struct{}{}
@@ -110,6 +137,18 @@ func (s *Whatsmiau) Handle(id string) whatsmeow.EventHandler {
 			}
 
 			switch e := evt.(type) {
+			case *events.Connected:
+				s.handleConnectionEvent(id, instance, "open", eventMap)
+			case *events.Disconnected:
+				s.handleConnectionEvent(id, instance, "closed", eventMap)
+			case *events.LoggedIn:
+				zap.L().Info("Login successful!", zap.String("instance", id), zap.String("jid", e.JID.String()))
+				// Atualiza o RemoteJID no repositório após o login bem-sucedido
+				if _, err := s.repo.Update(context.Background(), id, &models.Instance{
+					RemoteJID: e.JID.String(),
+				}); err != nil {
+					zap.L().Error("failed to update instance after login", zap.Error(err))
+				}
 			case *events.Message:
 				s.handleMessageEvent(id, instance, e, eventMap)
 			case *events.Receipt:
@@ -142,10 +181,10 @@ func (s *Whatsmiau) handleMessageEvent(id string, instance *models.Instance, e *
 		return
 	}
 
-	// NOVO: Enviar confirmações automáticas para mensagens recebidas
+	// Enviar confirmações automáticas para mensagens recebidas
 	if !e.Info.IsFromMe && instance.AutoReadMessages {
 		// Enviar confirmação de recebimento imediatamente (✓✓)
-		go s.SendDeliveryReceipt(id, e.Info.Chat, e.Info.ID)
+		go s.SendDeliveryReceipt(id, e.Info.Chat, e.Info.Sender, e.Info.ID)
 
 		// Enviar confirmação de visualização com delay (✓✓ azul)
 		go func() {
@@ -154,7 +193,7 @@ func (s *Whatsmiau) handleMessageEvent(id string, instance *models.Instance, e *
 				delay = 8 * time.Second // Delay padrão de 8 segundos
 			}
 			time.Sleep(delay)
-			s.SendReadReceipt(id, e.Info.Chat, e.Info.ID)
+			s.SendReadReceipt(id, e.Info.Chat, e.Info.Sender, e.Info.ID)
 		}()
 	}
 
@@ -167,22 +206,20 @@ func (s *Whatsmiau) handleMessageEvent(id string, instance *models.Instance, e *
 	messageData.InstanceId = instance.ID
 
 	wookMessage := &WookEvent[WookMessageData]{
-		Instance: instance.ID,
+		Instance: id,
 		Data:     messageData,
 		DateTime: time.Now(),
 		Event:    WookMessagesUpsert,
 	}
-
-	if wookMessage.Data.Message != nil && len(wookMessage.Data.Message.Base64) > 0 {
-		b64Temp := wookMessage.Data.Message.Base64
-		wookMessage.Data.Message.Base64 = ""
-		zap.L().Debug("message event", zap.String("instance", id), zap.Any("data", wookMessage.Data))
-		wookMessage.Data.Message.Base64 = b64Temp
-	} else if wookMessage.Data.Message != nil {
-		zap.L().Debug("message event", zap.String("instance", id), zap.Any("data", wookMessage.Data))
+	// Enviar para webhook da instância, se configurado
+	if instance.Webhook.Url != "" {
+		s.emit(wookMessage, instance.Webhook.Url)
 	}
 
-	s.emit(wookMessage, instance.Webhook.Url)
+	// Enviar para webhook global, se configurado
+	if env.Env.GlobalWebhookURL != "" {
+		s.emit(wookMessage, env.Env.GlobalWebhookURL)
+	}
 }
 
 func (s *Whatsmiau) handleReceiptEvent(id string, instance *models.Instance, e *events.Receipt, eventMap map[string]bool) {
@@ -199,15 +236,21 @@ func (s *Whatsmiau) handleReceiptEvent(id string, instance *models.Instance, e *
 		return
 	}
 
-	for _, event := range data {
-		wookData := &WookEvent[WookMessageUpdateData]{
-			Instance: instance.ID,
-			Data:     &event,
-			DateTime: time.Now(),
-			Event:    WookMessagesUpdate,
-		}
+	wookReceipt := &WookEvent[WookReceiptData]{
+		Instance: id,
+		Data:     data,
+		DateTime: time.Now(),
+		Event:    WookMessagesUpdate,
+	}
 
-		s.emit(wookData, instance.Webhook.Url)
+	// Enviar para webhook da instância, se configurado
+	if instance.Webhook.Url != "" {
+		s.emit(wookReceipt, instance.Webhook.Url)
+	}
+
+	// Enviar para webhook global, se configurado
+	if env.Env.GlobalWebhookURL != "" {
+		s.emit(wookReceipt, env.Env.GlobalWebhookURL)
 	}
 }
 
@@ -247,14 +290,22 @@ func (s *Whatsmiau) handleContactEvent(id string, instance *models.Instance, e *
 		return
 	}
 
-	wookData := &WookEvent[WookContactUpsertData]{
-		Instance: instance.ID,
-		Data:     &WookContactUpsertData{*data},
+	wookContact := &WookEvent[WookContactData]{
+		Instance: id,
+		Data:     data,
 		DateTime: time.Now(),
 		Event:    WookContactsUpsert,
 	}
 
-	s.emit(wookData, instance.Webhook.Url)
+	// Enviar para webhook da instância, se configurado
+	if instance.Webhook.Url != "" {
+		s.emit(wookContact, instance.Webhook.Url)
+	}
+
+	// Enviar para webhook global, se configurado
+	if env.Env.GlobalWebhookURL != "" {
+		s.emit(wookContact, env.Env.GlobalWebhookURL)
+	}
 }
 
 func (s *Whatsmiau) handlePictureEvent(id string, instance *models.Instance, e *events.Picture, eventMap map[string]bool) {
@@ -267,14 +318,22 @@ func (s *Whatsmiau) handlePictureEvent(id string, instance *models.Instance, e *
 		return
 	}
 
-	wookData := &WookEvent[WookContactUpsertData]{
-		Instance: instance.ID,
-		Data:     &WookContactUpsertData{*data},
+	wookPicture := &WookEvent[WookPictureData]{
+		Instance: id,
+		Data:     data,
 		DateTime: time.Now(),
-		Event:    WookContactsUpsert,
+		Event:    "contacts.update", // TODO: use wook const
 	}
 
-	s.emit(wookData, instance.Webhook.Url)
+	// Enviar para webhook da instância, se configurado
+	if instance.Webhook.Url != "" {
+		s.emit(wookPicture, instance.Webhook.Url)
+	}
+
+	// Enviar para webhook global, se configurado
+	if env.Env.GlobalWebhookURL != "" {
+		s.emit(wookPicture, env.Env.GlobalWebhookURL)
+	}
 }
 
 func (s *Whatsmiau) handleHistorySyncEvent(id string, instance *models.Instance, e *events.HistorySync, eventMap map[string]bool) {
@@ -287,14 +346,22 @@ func (s *Whatsmiau) handleHistorySyncEvent(id string, instance *models.Instance,
 		return
 	}
 
-	wookData := &WookEvent[WookContactUpsertData]{
-		Instance: instance.ID,
-		Data:     &data,
+	wookHistory := &WookEvent[WookHistorySyncData]{
+		Instance: id,
+		Data:     data,
 		DateTime: time.Now(),
-		Event:    WookContactsUpsert,
+		Event:    "history.sync", // TODO: use wook const
 	}
 
-	s.emit(wookData, instance.Webhook.Url)
+	// Enviar para webhook da instância, se configurado
+	if instance.Webhook.Url != "" {
+		s.emit(wookHistory, instance.Webhook.Url)
+	}
+
+	// Enviar para webhook global, se configurado
+	if env.Env.GlobalWebhookURL != "" {
+		s.emit(wookHistory, env.Env.GlobalWebhookURL)
+	}
 }
 
 func (s *Whatsmiau) handleGroupInfoEvent(id string, instance *models.Instance, e *events.GroupInfo, eventMap map[string]bool) {

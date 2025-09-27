@@ -314,10 +314,9 @@ func (s *Instance) UpdateReadSettings(ctx echo.Context) error {
 	})
 }
 
-// StartPairing inicia o processo de pairing para uma instância
-func (s *Instance) StartPairing(ctx echo.Context) error {
-	c := ctx.Request().Context()
-	var request dto.StartPairingRequest
+func (s *Instance) PairingCode(ctx echo.Context) error {
+	instanceID := ctx.Param("id")
+	var request dto.PairingCodeRequest
 	if err := ctx.Bind(&request); err != nil {
 		return utils.HTTPFail(ctx, http.StatusUnprocessableEntity, err, "failed to bind request body")
 	}
@@ -326,56 +325,45 @@ func (s *Instance) StartPairing(ctx echo.Context) error {
 		return utils.HTTPFail(ctx, http.StatusBadRequest, err, "invalid request body")
 	}
 
-	// Verificar se a instância existe
-	result, err := s.repo.List(c, request.ID)
+	// Chama a nova função centralizada
+	code, err := s.whatsmiau.PairPhone(ctx.Request().Context(), instanceID, request.PhoneNumber)
 	if err != nil {
-		zap.L().Error("failed to list instances", zap.Error(err))
-		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, "failed to list instances")
+		zap.L().Error("failed to start pairing", zap.String("instance", instanceID), zap.Error(err))
+		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, err.Error())
 	}
 
-	if len(result) == 0 {
-		return utils.HTTPFail(ctx, http.StatusNotFound, err, "instance not found")
-	}
-
-	// Iniciar pairing
-	response, err := s.whatsmiau.StartPairing(c, request.ID, request.PhoneNumber, request.ClientType, request.ClientName)
-	if err != nil {
-		zap.L().Error("failed to start pairing", zap.Error(err))
-		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, "failed to start pairing")
-	}
-
-	return ctx.JSON(http.StatusOK, response)
+	return ctx.JSON(http.StatusOK, dto.PairingCodeResponse{Code: code})
 }
 
-// GetPairingStatus retorna o status atual do pairing
-func (s *Instance) GetPairingStatus(ctx echo.Context) error {
-	c := ctx.Request().Context()
-	var request dto.PairingStatusRequest
+func (s *Instance) UpdateWebhook(ctx echo.Context) error {
+	instanceID := ctx.Param("id")
+	var request dto.UpdateWebhookRequest
 	if err := ctx.Bind(&request); err != nil {
 		return utils.HTTPFail(ctx, http.StatusUnprocessableEntity, err, "failed to bind request body")
 	}
 
-	if err := validator.New().Struct(&request); err != nil {
-		return utils.HTTPFail(ctx, http.StatusBadRequest, err, "invalid request body")
-	}
-
-	// Verificar se a instância existe
-	result, err := s.repo.List(c, request.ID)
-	if err != nil {
-		zap.L().Error("failed to list instances", zap.Error(err))
-		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, "failed to list instances")
-	}
-
-	if len(result) == 0 {
+	c := ctx.Request().Context()
+	// Busca a instância atual para não sobrescrever outros campos
+	instancesList, err := s.repo.List(c, instanceID)
+	if err != nil || len(instancesList) == 0 {
+		if err == nil {
+			err = errors.New("instance not found")
+		}
 		return utils.HTTPFail(ctx, http.StatusNotFound, err, "instance not found")
 	}
+	currentInstance := instancesList[0]
 
-	// Obter status do pairing
-	response, err := s.whatsmiau.GetPairingStatus(c, request.ID, request.SessionID)
+	// Atualiza apenas os campos do webhook
+	currentInstance.Webhook.Url = request.Url
+	currentInstance.Webhook.ByEvents = request.ByEvents
+	currentInstance.Webhook.Events = request.Events
+
+	// Salva a instância atualizada
+	updatedInstance, err := s.repo.Update(c, instanceID, &currentInstance)
 	if err != nil {
-		zap.L().Error("failed to get pairing status", zap.Error(err))
-		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, "failed to get pairing status")
+		zap.L().Error("failed to update instance webhook", zap.Error(err))
+		return utils.HTTPFail(ctx, http.StatusInternalServerError, err, "failed to update webhook")
 	}
 
-	return ctx.JSON(http.StatusOK, response)
+	return ctx.JSON(http.StatusOK, updatedInstance)
 }

@@ -1,6 +1,9 @@
 package whatsmiau
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -9,6 +12,7 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/verbeux-ai/whatsmiau/env"
 	"github.com/verbeux-ai/whatsmiau/interfaces"
+	"github.com/verbeux-ai/whatsmiau/lib/converter"
 	"github.com/verbeux-ai/whatsmiau/lib/storage/gcs"
 	"github.com/verbeux-ai/whatsmiau/models"
 	"github.com/verbeux-ai/whatsmiau/repositories/instances"
@@ -18,7 +22,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"go.uber.org/zap"
-	"golang.org/x/net/context"
 )
 
 type Whatsmiau struct {
@@ -29,12 +32,11 @@ type Whatsmiau struct {
 	qrCache          *xsync.Map[string, string]
 	observerRunning  *xsync.Map[string, bool]
 	instanceCache    *xsync.Map[string, models.Instance]
-	pairingCache     *xsync.Map[string, PairingSession]
-	pairingObserver  *xsync.Map[string, bool]
 	emitter          chan emitter
 	httpClient       *http.Client
 	fileStorage      interfaces.Storage
 	handlerSemaphore chan struct{}
+	converter        *converter.ConverterService
 }
 
 var instance *Whatsmiau
@@ -46,7 +48,7 @@ func Get() *Whatsmiau {
 	return instance
 }
 
-func LoadMiau(ctx context.Context, container *sqlstore.Container) {
+func LoadMiau(ctx context.Context, container *sqlstore.Container, converterSvc *converter.ConverterService) {
 	mu.Lock()
 	defer mu.Unlock()
 	deviceStore, err := container.GetAllDevices(ctx)
@@ -113,14 +115,13 @@ func LoadMiau(ctx context.Context, container *sqlstore.Container) {
 		qrCache:         xsync.NewMap[string, string](),
 		instanceCache:   xsync.NewMap[string, models.Instance](),
 		observerRunning: xsync.NewMap[string, bool](),
-		pairingCache:    xsync.NewMap[string, PairingSession](),
-		pairingObserver: xsync.NewMap[string, bool](),
 		emitter:         make(chan emitter, env.Env.EmitterBufferSize),
 		httpClient: &http.Client{
 			Timeout: time.Second * 30, // TODO: load from env
 		},
 		fileStorage:      storage,
 		handlerSemaphore: make(chan struct{}, env.Env.HandlerSemaphoreSize),
+		converter:        converterSvc,
 	}
 
 	go instance.startEmitter()
@@ -327,14 +328,14 @@ func (s *Whatsmiau) extractJidLid(ctx context.Context, id string, jid types.JID)
 }
 
 // SendDeliveryReceipt envia confirmação de recebimento (✓✓)
-func (s *Whatsmiau) SendDeliveryReceipt(instanceID string, chatJID types.JID, messageID string) error {
+func (s *Whatsmiau) SendDeliveryReceipt(instanceID string, chatJID types.JID, senderJID types.JID, messageID string) error {
 	client, ok := s.clients.Load(instanceID)
 	if !ok {
 		return whatsmeow.ErrClientIsNil
 	}
 
-	// Enviar confirmação de entrega usando MarkRead
-	err := client.MarkRead([]string{messageID}, time.Now(), chatJID, types.EmptyJID)
+	// Usa SendReceipt para marcar apenas como "entregue"
+	err := client.SendReceipt(chatJID, senderJID, []string{messageID}, "")
 
 	if err != nil {
 		zap.L().Error("failed to send delivery receipt",
@@ -347,14 +348,14 @@ func (s *Whatsmiau) SendDeliveryReceipt(instanceID string, chatJID types.JID, me
 }
 
 // SendReadReceipt envia confirmação de visualização (✓✓ azul)
-func (s *Whatsmiau) SendReadReceipt(instanceID string, chatJID types.JID, messageID string) error {
+func (s *Whatsmiau) SendReadReceipt(instanceID string, chatJID types.JID, senderJID types.JID, messageID string) error {
 	client, ok := s.clients.Load(instanceID)
 	if !ok {
 		return whatsmeow.ErrClientIsNil
 	}
 
-	// Enviar confirmação de leitura usando MarkRead
-	err := client.MarkRead([]string{messageID}, time.Now(), chatJID, types.EmptyJID)
+	// A função MarkRead está correta para marcar como "lida"
+	err := client.MarkRead([]string{messageID}, time.Now(), chatJID, senderJID)
 
 	if err != nil {
 		zap.L().Error("failed to send read receipt",
@@ -364,4 +365,44 @@ func (s *Whatsmiau) SendReadReceipt(instanceID string, chatJID types.JID, messag
 	}
 
 	return err
+}
+
+// PairPhone inicia a conexão via código de pareamento.
+func (s *Whatsmiau) PairPhone(ctx context.Context, instanceID, phoneNumber string) (string, error) {
+	client, ok := s.clients.Load(instanceID)
+	if !ok {
+		// Se o cliente não existe, cria um novo para o processo de pareamento
+		device := s.container.NewDevice()
+		client = whatsmeow.NewClient(device, s.logger)
+		s.clients.Store(instanceID, client)
+	}
+
+	// Se já estiver logado, não faz nada
+	if client.IsLoggedIn() {
+		return "", errors.New("instance is already connected")
+	}
+
+	// Conecta o cliente se ele não estiver conectado
+	if !client.IsConnected() {
+		if err := client.Connect(); err != nil {
+			return "", fmt.Errorf("failed to connect client: %w", err)
+		}
+	}
+
+	// Adiciona o event handler ANTES de gerar o código
+	client.AddEventHandler(s.Handle(instanceID))
+
+	// Gera o código de pareamento
+	code, err := client.PairPhone(ctx, phoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Windows)")
+	if err != nil {
+		// Se falhar, desconecta para permitir nova tentativa
+		client.Disconnect()
+		s.clients.Delete(instanceID)
+		return "", fmt.Errorf("failed to generate pairing code: %w", err)
+	}
+
+	// Formata o código com um hífen para facilitar a leitura (XXXX-XXXX)
+	formattedCode := fmt.Sprintf("%s-%s", code[:4], code[4:])
+
+	return formattedCode, nil
 }

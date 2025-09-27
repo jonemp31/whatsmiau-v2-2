@@ -5,9 +5,10 @@ import "time"
 type Wook string
 
 const (
-	WookMessagesUpsert Wook = "messages.upsert"
-	WookMessagesUpdate Wook = "messages.update"
-	WookContactsUpsert Wook = "contacts.upsert"
+	WookMessagesUpsert   Wook = "messages.upsert"
+	WookMessagesUpdate   Wook = "messages.update"
+	WookContactsUpsert   Wook = "contacts.upsert"
+	WookConnectionUpdate Wook = "connection.update"
 )
 
 type WookEvent[data any] struct {
@@ -19,6 +20,11 @@ type WookEvent[data any] struct {
 	ServerUrl   string    `json:"server_url,omitempty"`
 	Apikey      string    `json:"apikey,omitempty"`
 	Event       Wook      `json:"event,omitempty"`
+}
+
+// WookConnectionUpdateData é o payload para eventos de atualização de conexão.
+type WookConnectionUpdateData struct {
+	State string `json:"state"` // "open", "connecting", "closed"
 }
 
 type WookMessageData struct {

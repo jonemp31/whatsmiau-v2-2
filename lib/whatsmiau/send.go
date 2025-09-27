@@ -2,7 +2,6 @@ package whatsmiau
 
 import (
 	"context"
-	"io"
 	"time"
 
 	"go.mau.fi/whatsmeow"
@@ -89,22 +88,13 @@ func (s *Whatsmiau) SendAudio(ctx context.Context, data *SendAudio) (*SendAudioR
 		return nil, whatsmeow.ErrClientIsNil
 	}
 
-	resAudio, err := s.getCtx(ctx, data.AudioURL)
+	convertedBytes, err := s.converter.ProcessMedia(ctx, data.AudioURL, "audio")
 	if err != nil {
+		zap.L().Error("failed to process audio with converter service", zap.Error(err))
 		return nil, err
 	}
 
-	dataBytes, err := io.ReadAll(resAudio.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	audioData, waveForm, secs, err := convertAudio(dataBytes, 64)
-	if err != nil {
-		return nil, err
-	}
-
-	uploaded, err := client.Upload(ctx, audioData, whatsmeow.MediaAudio)
+	uploaded, err := client.Upload(ctx, convertedBytes, whatsmeow.MediaAudio)
 	if err != nil {
 		return nil, err
 	}
@@ -114,12 +104,12 @@ func (s *Whatsmiau) SendAudio(ctx context.Context, data *SendAudio) (*SendAudioR
 		Mimetype:      proto.String("audio/ogg; codecs=opus"),
 		FileSHA256:    uploaded.FileSHA256,
 		FileLength:    proto.Uint64(uploaded.FileLength),
-		Seconds:       proto.Uint32(uint32(secs)),
+		Seconds:       proto.Uint32(0), // Duração não é mais calculada, pode ser adicionada no futuro
 		PTT:           proto.Bool(true),
 		MediaKey:      uploaded.MediaKey,
 		FileEncSHA256: uploaded.FileEncSHA256,
 		DirectPath:    proto.String(uploaded.DirectPath),
-		Waveform:      waveForm,
+		Waveform:      nil, // Waveform não é mais calculado, pode ser adicionado no futuro
 		ViewOnce:      proto.Bool(data.ViewOnce),
 	}
 
@@ -156,17 +146,13 @@ func (s *Whatsmiau) SendDocument(ctx context.Context, data *SendDocumentRequest)
 		return nil, whatsmeow.ErrClientIsNil
 	}
 
-	resMedia, err := s.getCtx(ctx, data.MediaURL)
+	convertedBytes, err := s.converter.ProcessMedia(ctx, data.MediaURL, "document")
 	if err != nil {
+		zap.L().Error("failed to process document with converter service", zap.Error(err))
 		return nil, err
 	}
 
-	dataBytes, err := io.ReadAll(resMedia.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	uploaded, err := client.Upload(ctx, dataBytes, whatsmeow.MediaDocument)
+	uploaded, err := client.Upload(ctx, convertedBytes, whatsmeow.MediaDocument)
 	if err != nil {
 		return nil, err
 	}
@@ -216,28 +202,20 @@ func (s *Whatsmiau) SendImage(ctx context.Context, data *SendImageRequest) (*Sen
 		return nil, whatsmeow.ErrClientIsNil
 	}
 
-	resMedia, err := s.getCtx(ctx, data.MediaURL)
+	convertedBytes, err := s.converter.ProcessMedia(ctx, data.MediaURL, "image")
 	if err != nil {
+		zap.L().Error("failed to process image with converter service", zap.Error(err))
 		return nil, err
 	}
 
-	dataBytes, err := io.ReadAll(resMedia.Body)
+	uploaded, err := client.Upload(ctx, convertedBytes, whatsmeow.MediaImage)
 	if err != nil {
 		return nil, err
-	}
-
-	uploaded, err := client.Upload(ctx, dataBytes, whatsmeow.MediaImage)
-	if err != nil {
-		return nil, err
-	}
-
-	if data.Mimetype == "" {
-		data.Mimetype, err = extractMimetype(dataBytes, uploaded.URL)
 	}
 
 	doc := waE2E.ImageMessage{
 		URL:           proto.String(uploaded.URL),
-		Mimetype:      proto.String(data.Mimetype),
+		Mimetype:      proto.String("image/webp"),
 		Caption:       proto.String(data.Caption),
 		FileSHA256:    uploaded.FileSHA256,
 		FileLength:    proto.Uint64(uploaded.FileLength),
@@ -280,23 +258,19 @@ func (s *Whatsmiau) SendVideo(ctx context.Context, data *SendVideoRequest) (*Sen
 		return nil, whatsmeow.ErrClientIsNil
 	}
 
-	resMedia, err := s.getCtx(ctx, data.MediaURL)
+	convertedBytes, err := s.converter.ProcessMedia(ctx, data.MediaURL, "video")
 	if err != nil {
+		zap.L().Error("failed to process video with converter service", zap.Error(err))
 		return nil, err
 	}
 
-	dataBytes, err := io.ReadAll(resMedia.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	uploaded, err := client.Upload(ctx, dataBytes, whatsmeow.MediaVideo)
+	uploaded, err := client.Upload(ctx, convertedBytes, whatsmeow.MediaVideo)
 	if err != nil {
 		return nil, err
 	}
 
 	if data.Mimetype == "" {
-		data.Mimetype, err = extractMimetype(dataBytes, uploaded.URL)
+		data.Mimetype, err = extractMimetype(convertedBytes, uploaded.URL)
 		if err != nil {
 			zap.L().Warn("failed to extract mimetype for video", zap.Error(err))
 		}
