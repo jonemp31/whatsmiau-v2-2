@@ -133,7 +133,11 @@ func (s *ConverterService) download(ctx context.Context, url string) ([]byte, er
 }
 
 func (s *ConverterService) convertToWebp(ctx context.Context, input []byte) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "vips",
+	// Timeout curto para evitar travamentos
+	ctxVips, cancelVips := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelVips()
+
+	cmd := exec.CommandContext(ctxVips, "vips",
 		"webpsave_buffer",
 		"--preset=default",
 		"--Q=80",
@@ -155,7 +159,11 @@ func (s *ConverterService) convertToWebp(ctx context.Context, input []byte) ([]b
 }
 
 func (s *ConverterService) convertToWebpFFmpeg(ctx context.Context, input []byte) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+	// Timeout curto para evitar travamentos
+	ctxFF, cancelFF := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelFF()
+
+	cmd := exec.CommandContext(ctxFF, "ffmpeg",
 		"-hide_banner",
 		"-loglevel", "error",
 		"-i", "pipe:0",
@@ -177,32 +185,61 @@ func (s *ConverterService) convertToWebpFFmpeg(ctx context.Context, input []byte
 
 // FIX: A função foi completamente reescrita para extrair duração e gerar a waveform.
 func (s *ConverterService) convertToOpus(ctx context.Context, input []byte) (opusData []byte, waveform []byte, duration float64, err error) {
-	// Etapa 1: Extrair a duração do áudio com ffprobe
-	durationCmd := exec.CommandContext(ctx, "ffprobe",
-		"-i", "pipe:0",
-		"-show_entries", "format=duration",
-		"-v", "quiet",
-		"-of", "csv=p=0",
-	)
-	durationCmd.Stdin = bytes.NewReader(input)
-	var durationOut bytes.Buffer
-	durationCmd.Stdout = &durationOut
-	if err = durationCmd.Run(); err != nil {
-		return nil, nil, 0, fmt.Errorf("ffprobe failed to get duration: %w", err)
+	// Etapa 1: Extrair a duração do áudio com ffprobe (com timeouts e fallbacks)
+	// 1.1 Tentar format duration
+	{
+		ctxProbe, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		durationCmd := exec.CommandContext(ctxProbe, "ffprobe",
+			"-v", "error",
+			"-i", "pipe:0",
+			"-show_entries", "format=duration",
+			"-of", "default=nokey=1:noprint_wrappers=1",
+		)
+		durationCmd.Stdin = bytes.NewReader(input)
+		var durationOut bytes.Buffer
+		durationCmd.Stdout = &durationOut
+		if runErr := durationCmd.Run(); runErr == nil {
+			durationStr := strings.TrimSpace(durationOut.String())
+			if len(durationStr) > 0 && strings.ToUpper(durationStr) != "N/A" {
+				if parsed, pErr := strconv.ParseFloat(durationStr, 64); pErr == nil {
+					duration = parsed
+				}
+			}
+		}
 	}
-	durationStr := strings.TrimSpace(durationOut.String())
-	duration, err = strconv.ParseFloat(durationStr, 64)
-	if err != nil {
-		// Adiciona log detalhado em caso de falha na conversão da duração,
-		// mas permite que o envio continue com duração 0 para não quebrar o fluxo.
-		zap.L().Error("failed to parse audio duration from ffprobe",
-			zap.Error(err),
-			zap.String("ffprobe_output", durationStr))
-		duration = 0 // Define como 0 em caso de erro, mas loga o problema.
+
+	// 1.2 Fallback: tentar stream duration (a:0)
+	if duration <= 0 {
+		ctxProbe2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel2()
+
+		streamCmd := exec.CommandContext(ctxProbe2, "ffprobe",
+			"-v", "error",
+			"-select_streams", "a:0",
+			"-show_entries", "stream=duration",
+			"-of", "default=nokey=1:noprint_wrappers=1",
+			"-i", "pipe:0",
+		)
+		streamCmd.Stdin = bytes.NewReader(input)
+		var streamOut bytes.Buffer
+		streamCmd.Stdout = &streamOut
+		if runErr := streamCmd.Run(); runErr == nil {
+			durationStr := strings.TrimSpace(streamOut.String())
+			if len(durationStr) > 0 && strings.ToUpper(durationStr) != "N/A" {
+				if parsed, pErr := strconv.ParseFloat(durationStr, 64); pErr == nil {
+					duration = parsed
+				}
+			}
+		}
 	}
 
 	// Etapa 2: Converter o áudio principal para Opus
-	opusCmd := exec.CommandContext(ctx, "ffmpeg",
+	ctxOpus, cancelOpus := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelOpus()
+
+	opusCmd := exec.CommandContext(ctxOpus, "ffmpeg",
 		"-hide_banner", "-loglevel", "error",
 		"-i", "pipe:0",
 		"-c:a", "libopus", "-b:a", "128k", "-vbr", "on",
@@ -220,7 +257,10 @@ func (s *ConverterService) convertToOpus(ctx context.Context, input []byte) (opu
 	opusData = opusBuffer.Bytes()
 
 	// Etapa 3: Gerar dados brutos para a waveform
-	waveformCmd := exec.CommandContext(ctx, "ffmpeg",
+	ctxWf, cancelWf := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelWf()
+
+	waveformCmd := exec.CommandContext(ctxWf, "ffmpeg",
 		"-hide_banner", "-loglevel", "error",
 		"-i", "pipe:0",
 		"-f", "s8", // Formato de 8-bit assinado
@@ -276,6 +316,15 @@ func (s *ConverterService) convertToOpus(ctx context.Context, input []byte) (opu
 		finalWaveform[i] = peak
 	}
 	waveform = finalWaveform
+
+	// Fallback de duração a partir dos samples da waveform (mono 8kHz, 1 byte por amostra)
+	if duration <= 0 && totalSamples > 0 {
+		duration = float64(totalSamples) / 8000.0
+	}
+	// Arredondar duração mínima para 1s para melhor UX
+	if duration > 0 && duration < 1.0 {
+		duration = 1.0
+	}
 
 	return
 }

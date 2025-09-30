@@ -201,15 +201,11 @@ func (s *Whatsmiau) SendStatusAudio(ctx context.Context, data *SendStatusAudioRe
 		return nil, whatsmeow.ErrClientIsNil
 	}
 
-	// Usar o converter service para processar áudio
-	audioData, err := s.converter.ProcessMedia(ctx, data.MediaURL, "audio")
+	// Usar o converter service especializado para obter áudio + waveform + duração
+	audioData, waveForm, secs, err := s.converter.ProcessAudio(ctx, data.MediaURL)
 	if err != nil {
 		return nil, err
 	}
-	
-	// Para manter compatibilidade, usar valores padrão
-	waveForm := []byte{}
-	secs := 0.0
 
 	uploaded, err := client.Upload(ctx, audioData, whatsmeow.MediaAudio)
 	if err != nil {
